@@ -128,6 +128,9 @@ class SublimeFilesSaveAsCommand(sublime_plugin.TextCommand):
 
   # actually save
   def save(self, file):
+    if os.path.exists(file):
+      sublime.error_message("File {} already exists.".format(file))
+      return
     self.view.retarget(file)
     self.view.run_command("save")
 
