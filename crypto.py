@@ -1,4 +1,5 @@
 import base64
+import functools
 import os.path
 import subprocess
 import sublime
@@ -7,74 +8,79 @@ import sublime_plugin
 class Crypto(sublime_plugin.ViewEventListener):
   def __init__(self, *args):
     super().__init__(*args)
-    self.enabled = False
-    self.encrypted = True
+    self.enabled = False # are we responding to events
+    self.encrypted = True # is the current view encrypted
     self.passwordCache = None
-    self.fname = None
-    self.busy = False
-    self.activating = False
+    self.fname = None # used to detect renames / new files
+    self.busy = False # currently editing the view so ignore on_modified
+    self.activated = False # only trigger on_activated once
+    self.locki = 0
+
+  def prompt(self, prompt, callback, verify=lambda p: True):
+    self.enabled = False
+    self.view.set_read_only(True)
+    self.view.window().show_input_panel(prompt, "", functools.partial(self.verify, prompt, callback, verify), None, functools.partial(self.verify, prompt, callback, verify))
+
+  def verify(self, prompt, callback, verify, password=None):
+    self.view.set_read_only(False) # verify might need to edit
+    if not password or not verify(password):
+      sublime.error_message("Invalid password.")
+      self.prompt(prompt, callback, verify)
+    else:
+      callback(password)
+      self.enabled = True
 
   def on_activated(self):
-    if not self.encrypted or self.activating:
+    if self.activated:
       return
+    self.activated = True
     fname = self.view.file_name()
     if fname is None or os.path.splitext(fname)[1] != ".enc":
-      self.encrypted = False
       return
     print("activated")
-    self.view.set_read_only(True)
-    self.activating = True
-    self.view.window().show_input_panel("Enter password", "", self.setup, None, self.disable)
+    self.enabled = True
+    self.fname = fname
+    self.prompt("Enter password", self.setup, self.decrypt)
+
+  def setup(self, password):
+    print("setup")
+    self.passwordCache = password
 
   def on_pre_save(self):
     fname = self.view.file_name()
     if fname != self.fname: # new file / save as
       if fname is None or os.path.splitext(fname)[1] != ".enc":
+        self.enabled = False
+        self.view.set_scratch(False)
         return
-      print("saveas")
-      self.view.window().show_input_panel("Enter new password", "", self.setup, None, self.disable)
-    elif self.enabled and not self.encrypted:
+    if self.enabled and not self.encrypted:
       print("pre")
       self.encrypt()
 
   def on_post_save(self):
-    if not self.enabled:
-      return
-    print("post")
-    if self.encrypted:
+    if self.enabled and self.encrypted:
+      print("post")
       self.decrypt()
+    fname = self.view.file_name()
+    if fname != self.fname: # new file / save as
+      self.fname = fname
+      if fname is None or os.path.splitext(fname)[1] != ".enc":
+        return
+      print("save as")
+      self.prompt("Enter new password", self.setupEncrypt)
+
+  def setupEncrypt(self, password):
+    print("setup encrypt")
+    self.passwordCache = password
+    self.encrypted = False
+    self.enabled = True
+    self.view.run_command("save")
 
   def on_modified(self):
+    self.locki = (self.locki + 1) % 65536
     if not self.enabled or self.busy:
       return
     self.view.set_scratch(False)
-
-  def setup(self, password):
-    self.passwordCache = password
-    self.fname = self.view.file_name()
-    self.enabled = True
-    self.view.set_read_only(False)
-    if self.encrypted:
-      self.activating = False
-      if not self.decrypt():
-        self.view.set_read_only(True)
-        self.disable()
-        self.activating = True
-        self.view.window().show_input_panel("Enter password", "", self.setup, None, self.disable)
-    else:
-      if self.passwordCache:
-        self.view.run_command("save") # encrypt
-        self.activating = False
-      else:
-        sublime.error_message("Invalid password.")
-        self.view.window().show_input_panel("Enter new password", "", self.setup, None, self.disable)
-
-  def disable(self):
-    print("disable")
-    self.enabled = False
-    self.fname = None
-    self.passwordCache = None
-    self.activating = False
 
   def encrypt(self):
     print("encrypting")
@@ -83,20 +89,28 @@ class Crypto(sublime_plugin.ViewEventListener):
     self.encrypted = True
 
   # decrypt, make it seem like file is unmodified
-  def decrypt(self):
+  def decrypt(self, password=None):
     print("decrypting")
+    password = password or self.passwordCache
     self.busy = True
     sublime.set_timeout_async(self.not_busy, 100)
-    self.view.run_command("sublime_utils_decrypt", {"password": self.passwordCache, "showErrors": False})
+    self.view.run_command("sublime_utils_decrypt", {"password": password, "showErrors": False})
     if self.view.get_status("sublime_utils_decrypt_status") == "Failed":
       self.encrypted = True
-      sublime.error_message("Invalid password.")
       return False
     self.encrypted = False
     self.view.erase_status("sublime_utils_decrypt_status")
     self.view.reset_reference_document() # diff on left
     self.view.set_scratch(True) # no dirty flag in tab
+    sublime.set_timeout_async(functools.partial(self.lock, self.locki), 30*1000)
     return True
+
+  def lock(self, i):
+    if i != self.locki:
+      return
+    self.encrypt()
+    self.passwordCache = None
+    self.prompt("Enter password", self.setup, self.decrypt)
 
   def not_busy(self):
     self.busy = False
