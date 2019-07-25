@@ -1,5 +1,6 @@
 import base64
 import functools
+import time
 import os.path
 import subprocess
 import sublime
@@ -77,9 +78,10 @@ class Crypto(sublime_plugin.ViewEventListener):
     self.view.run_command("save")
 
   def on_modified(self):
-    self.locki = (self.locki + 1) % 65536
     if not self.enabled or self.busy:
       return
+    self.locki = (self.locki + 1) % 65536
+    sublime.set_timeout_async(functools.partial(self.lock, self.locki), 30*1000)
     self.view.set_scratch(False)
 
   def encrypt(self):
@@ -102,12 +104,14 @@ class Crypto(sublime_plugin.ViewEventListener):
     self.view.erase_status("sublime_utils_decrypt_status")
     self.view.reset_reference_document() # diff on left
     self.view.set_scratch(True) # no dirty flag in tab
-    sublime.set_timeout_async(functools.partial(self.lock, self.locki), 30*1000)
+    sublime.set_timeout_async(functools.partial(self.lock, self.locki), 10*60*1000)
     return True
 
   def lock(self, i):
-    if i != self.locki:
+    if i != self.locki or self.encrypted or not self.enabled or self.view.window() is None:
       return
+    print("lock")
+    self.view.run_command("save")
     self.encrypt()
     self.passwordCache = None
     self.prompt("Enter password", self.setup, self.decrypt)
