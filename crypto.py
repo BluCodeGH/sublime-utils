@@ -1,6 +1,5 @@
 import base64
 import functools
-import time
 import os.path
 import subprocess
 import sublime
@@ -16,17 +15,48 @@ class Crypto(sublime_plugin.ViewEventListener):
     self.busy = False # currently editing the view so ignore on_modified
     self.activated = False # only trigger on_activated once
     self.locki = 0
+    self.buf = ""
+    self.prompti = 0
 
   def prompt(self, prompt, callback, verify=lambda p: True):
     self.enabled = False
     self.view.set_read_only(True)
-    self.view.window().show_input_panel(prompt, "", functools.partial(self.verify, prompt, callback, verify), None, functools.partial(self.verify, prompt, callback, verify))
+    self.buf = ""
+    self.prompti = 0
+    context = (prompt, callback, verify)
+    self.view.window().show_input_panel(
+        prompt,
+        "",
+        functools.partial(self.verify, context, self.prompti),
+        functools.partial(self.wip, context, self.prompti),
+        functools.partial(self.verify, context, self.prompti)
+    )
 
-  def verify(self, prompt, callback, verify, password=None):
+  def wip(self, context, prompti, password):
+    if self.prompti != prompti:
+      return
+    old = len(self.buf)
+    self.buf = self.buf[:len(password)]
+    self.buf += password[len(self.buf):]
+    if len(self.buf) != old:
+      self.prompti += 1
+      self.view.window().show_input_panel(
+          context[0],
+          "*" * len(password),
+          functools.partial(self.verify, context, self.prompti),
+          functools.partial(self.wip, context, self.prompti),
+          functools.partial(self.verify, context, self.prompti)
+      )
+
+  def verify(self, context, prompti, _=None):
+    if self.prompti != prompti:
+      return
     self.view.set_read_only(False) # verify might need to edit
+    password = self.buf
+    _, callback, verify = context
     if not password or not verify(password):
       sublime.error_message("Invalid password.")
-      self.prompt(prompt, callback, verify)
+      self.prompt(*context)
     else:
       callback(password)
       self.enabled = True
