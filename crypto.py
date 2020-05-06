@@ -111,7 +111,7 @@ class Crypto(sublime_plugin.ViewEventListener):
     if not self.enabled or self.busy:
       return
     self.locki = (self.locki + 1) % 65536
-    sublime.set_timeout_async(functools.partial(self.lock, self.locki), 30*1000)
+    sublime.set_timeout_async(functools.partial(self.lock, self.locki), 10*60*1000)
     self.view.set_scratch(False)
 
   def encrypt(self):
