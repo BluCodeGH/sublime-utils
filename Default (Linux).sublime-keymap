@@ -2,4 +2,6 @@
   { "keys": ["ctrl+o"], "command": "sublime_files_open"},
   { "keys": ["ctrl+s"] ,"command": "sublime_files_save"},
   { "keys": ["ctrl+shift+s"] ,"command": "sublime_files_save_as"},
+  { "keys": ["alt+a"] ,"command": "align_cursors"},
+  { "keys": ["alt+i"] ,"command": "increment"},
 ]
