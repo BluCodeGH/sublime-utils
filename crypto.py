@@ -54,12 +54,19 @@ class Crypto(sublime_plugin.ViewEventListener):
     self.view.set_read_only(False) # verify might need to edit
     password = self.buf
     _, callback, verify = context
-    if not password or not verify(password):
+    if not password:
+      self.close()
+    elif not verify(password):
       sublime.error_message("Invalid password.")
       self.prompt(*context)
     else:
       callback(password)
       self.enabled = True
+
+  def close(self):
+    print("Closing")
+    self.view.window().focus_view(self.view)
+    self.view.window().run_command('close_file')
 
   def on_activated(self):
     if self.activated:
